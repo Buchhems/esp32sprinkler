@@ -1,0 +1,93 @@
+esphome:
+  name: sprinklercomputer
+
+esp32:
+  board: esp32dev
+
+# Status LED
+light:
+  - platform: status_led
+    name: "RelayBoard Led"
+    restore_mode: ALWAYS_ON
+    pin: GPIO23
+
+# Achtung: Relais schalten meist aktiv LOW => inverted: true
+switch:
+  - platform: gpio
+    pin:
+      number: GPIO32
+      inverted: true
+    name: "Ventil 1"
+    id: valve1
+
+  - platform: gpio
+    pin:
+      number: GPIO33
+      inverted: true
+    name: "Ventil 2"
+    id: valve2
+
+  - platform: gpio
+    pin:
+      number: GPIO25
+      inverted: true
+    name: "Ventil 3"
+    id: valve3
+
+  - platform: gpio
+    pin:
+      number: GPIO26
+      inverted: true
+    name: "Ventil 4"
+    id: valve4
+
+  - platform: gpio
+    pin:
+      number: GPIO27
+      inverted: true
+    name: "Ventil 5"
+    id: valve5
+
+  - platform: gpio
+    pin:
+      number: GPIO14
+      inverted: true
+    name: "Ventil 6"
+    id: valve6
+
+  - platform: gpio
+    pin:
+      number: GPIO12
+      inverted: true
+    name: "Ventil 7"
+    id: valve7
+
+  - platform: gpio
+    pin:
+      number: GPIO13
+      inverted: true
+    name: "Ventil 8"
+    id: valve8
+    
+wifi:
+  ssid: "abc"
+  password: "xyz"
+  
+  ap:  # Optional: fallback im Fehlerfall
+    ssid: "sprinklercomputer Fallback"
+    password: "abc"
+
+# Logging über serielle Konsole
+logger:
+
+# OTA (Over-the-Air) Updates
+ota:
+  platform: esphome
+
+# API für Home Assistant
+api:
+web_server:
+  port: 80
+  auth:
+    username: root
+    password: abc
