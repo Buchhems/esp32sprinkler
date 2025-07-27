@@ -602,6 +602,7 @@ script:
       - globals.set:
           id: rain_pause_start_day
           value: '0'
+      - component.update: next_watering
       - component.update: overall_status
      
 # ⏲️ TIMER & AUTOMATISCHE BEWÄSSERUNG
