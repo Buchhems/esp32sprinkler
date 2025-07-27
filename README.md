@@ -43,6 +43,9 @@ The power supply for the valves needs to be connected directly to the relays (ou
 
 ## 💻 Web Interface
 
+<img width="3802" height="1520" alt="grafik" src="https://github.com/user-attachments/assets/9010032f-85fe-43e4-8ca0-463b907809e0" />
+
+
 - **Authentication**:  
   - Username: `root`  
   - Password: `abc`
