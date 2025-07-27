@@ -9,7 +9,7 @@ Going on vacation and setting rain pauses remotely was not possible.
 
 To power your valves or pumps you need the equivalent power supply (in my case 24V AC) plus the necessary 5V DC power supply.
 The 5V DC power supply powers the board itself (green screwable connectors on top of the board). Alternatively you can power it with 7-30V DC (different connector).
-The power supply for the valves needs to be connected directly to the relays (outgoing power cable from PS to green COM connector, NC => valve, - from PS => arriving power cable from valves).
+The power supply for the valves needs to be connected directly to the relays (outgoing power cable from PS to green COM connector, NO => valve, - from PS => arriving power cable from valves).
 
 ---
 
