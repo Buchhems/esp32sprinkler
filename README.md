@@ -1,4 +1,4 @@
-# 🌱 ESP32 Smart Sprinkler Controller
+# 🌱 ESP32 (8x Relay Board) Smart Sprinkler Controller
 
 An intelligent, time-based irrigation system powered by ESPHome and ESP32. This project automates garden watering using GPIO-controlled valves, rain pause logic, and a web interface for configuration and monitoring.
 You can get a Esp32 Relay Board with up to 8 relays quite cheap on Aliexpress for as little as €30.
