@@ -72,6 +72,18 @@ globals:
     type: int
     restore_value: true
     initial_value: '0'
+  - id: last_watering_1
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: last_watering_2
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: last_watering_3
+    type: int
+    restore_value: true
+    initial_value: '0'
 
 # Status LED (intern)
 light:
@@ -268,7 +280,7 @@ button:
       - script.execute: stop_sequence
 
   - platform: template
-    name: "G1 🛑 NOTAUS - Alle Ventile AUS"
+    name: "G1 🛑 NOT-AUS - Alle Ventile AUS"
     icon: "mdi:alert"
     on_press:
       - script.execute: emergency_stop
@@ -303,94 +315,93 @@ text_sensor:
         return {"⏳ Zeit wird synchronisiert..."};
       }
     update_interval: 30s
-    
-  - platform: wifi_info
-    ip_address:
-      name: "H4 🌐 IP-Adresse"
-      icon: "mdi:ip-network-outline"
-      entity_category: diagnostic
-      
+  
   - platform: template
-    name: "H2 🌧 Regenpause Status"
-    id: rain_status
-    icon: "mdi:weather-rainy"
-    entity_category: ""
+    name: "H1 Gesamtstatus"
+    id: overall_status
+    icon: "mdi:clipboard-list"
+    update_interval: 10s
     lambda: |-
-      if (id(rain_pause_active)) {
-        auto time = id(sntp_time).now();
-        if (time.is_valid()) {
-          int current_day = time.day_of_year;
-          int rain_start_day = id(rain_pause_start_day);
-          int rain_duration = (int)id(rain_pause_duration).state;
-          int days_passed = current_day - rain_start_day;
-          int days_remaining = rain_duration - days_passed;
-          
-          if (days_remaining > 0) {
-            return {"🟡 Aktiv (noch " + to_string(days_remaining) + " Tage)"};
-          } else {
-            return {"🟠 Läuft heute ab"};
-          }
-        } else {
-          return {"🟡 Aktiv (Zeit unbekannt)"};
-        }
-      } else {
-        return {"🟢 Nicht aktiv"};
-      }
-    update_interval: 30s
-    
-  - platform: template
-    name: "H1 📅 Bewässerungsstatus"
-    icon: "mdi:calendar-check"
-    lambda: |-
-      int raw = (int)id(next_watering).state;
-
-      if (raw <= -10) {
-        return {"⏸️ Regenpause aktiv – noch " + to_string(-10 - raw) + " Tage"};
-      } else if (raw == -2) {
-        return {"⏳ Zeit wird synchronisiert..."};
-      } else if (raw == 0) {
-        return {"🌱 Heute wird bewässert"};
-      } else {
-        return {"🕒 Noch " + to_string(raw) + " Tage"};
-      }
-    update_interval: 30s
-
-      
-  - platform: template
-    name: "H3 🔢 Sequenz Status"
-    id: sequence_status
-    icon: "mdi:information-outline"
-    entity_category: ""
-    lambda: |-
-      if (id(rain_pause_active)) {
-        return {"⏸️ Pausiert wegen Regen"};
-      }
-      
+      // 1. Wenn gerade bewässert wird
       if (id(sequential_running)) {
-        std::string valve_names[] = {"Sprinkler Eingang", "Sprinkler Trampolin", "Sprinkler Grill", "Tröpfchen Rechts", "Tröpfchen Links"};
-        std::string valve_icons[] = {"💦1", "💦2", "💦3", "💧4", "💧5"};
-        int valve_idx = id(current_valve_index);
-        if (valve_idx >= 0 && valve_idx < 5) {
-          return {"🟢 " + valve_icons[valve_idx] + " " + valve_names[valve_idx] + " läuft..."};
-        } else {
-          return {"🔄 Läuft..."};
+        static const char* names[] = {
+          "💦 Sprinkler Eingang",
+          "💦 Sprinkler Trampolin",
+          "💦 Sprinkler Grill",
+          "💧 Tröpfchen Rechts",
+          "💧 Tröpfchen Links"
+        };
+        int idx = id(current_valve_index);
+        const char* which = (idx >= 0 && idx < 5)
+          ? names[idx]
+          : "Ventil unbekannt";
+        return {"🚿 Aktuell: " + std::string(which)};
+      }
+
+      // 2. Wenn Regenpause aktiv
+      if (id(rain_pause_active)) {
+        auto t = id(sntp_time).now();
+        if (!t.is_valid()) {
+          return {"🌧️ Regenpause aktiv"};
         }
-      } else {
-        auto time = id(sntp_time).now();
-        if (time.is_valid()) {
-          int target_hour = (int)id(start_hour).state;
-          int target_minute = (int)id(start_minute).state;
-          char time_str[10];
-          sprintf(time_str, "%02d:%02d", target_hour, target_minute);
-          return {"⏰ Bereit für " + std::string(time_str) + " Uhr"};
+        int passed    = t.day_of_year - id(rain_pause_start_day);
+        int remaining = (int)id(rain_pause_duration).state - passed;
+        if (remaining > 0) {
+          return {"🌧️ Regenpause – noch " + to_string(remaining) + " Tage"};
         } else {
-          return {"⏰ Bereit (Zeit wird synchronisiert...)"};
+          return {"🌧️ Regenpause endet heute"};
         }
       }
-    update_interval: 5s
-    
+
+      // 3. Sonst: Tage bis zur nächsten Bewässerung
+      {
+        int raw = (int)id(next_watering).state;
+        if (raw == -2) {
+          return {"⏳ Zeit wird synchronisiert..."};
+        } else if (raw == 0) {
+          return {"🌱 Heute Bewässerung"};
+        } else {
+          return {"🕒 Nächste Bewässerung in " +
+                  to_string(raw) + " Tag(en)"};
+        }
+      } 
+      
   - platform: template
-    name: "⏱️ Betriebszeit"
+    name: "H2 ⏳ Letzte Bewässerungen"
+    icon: "mdi:calendar-clock"
+    lambda: |-
+      auto time = id(sntp_time).now();
+      if (!time.is_valid()) return {"⏳ Zeit wird synchronisiert..."};
+
+      int today = time.day_of_year;
+      int d[] = {id(last_watering_1), id(last_watering_2), id(last_watering_3)};
+      std::vector<std::string> ago_texts;
+
+      for (int i = 0; i < 3; i++) {
+        if (d[i] > 0) {
+          int delta = today - d[i];
+          if (delta == 0) {
+            ago_texts.push_back("heute");
+          } else if (delta > 0) {
+            ago_texts.push_back("vor " + to_string(delta) + " Tagen");
+          }
+        }
+      }
+
+      if (ago_texts.empty()) {
+        return {"Noch keine Bewässerung erfolgt"};
+      }
+
+      std::string result = "";
+      for (size_t i = 0; i < ago_texts.size(); i++) {
+        result += ago_texts[i];
+        if (i < ago_texts.size() - 1) result += ", ";
+      }
+      return {result};
+    update_interval: 60s
+
+  - platform: template
+    name: "H4 ⏱️ Betriebszeit"
     icon: "mdi:clock-time-eight-outline"
     entity_category: diagnostic
     lambda: |-
@@ -404,12 +415,19 @@ text_sensor:
         to_string(minutes) + " Minuten"
       };
     update_interval: 60s
+    
+  - platform: wifi_info
+    ip_address:
+      name: "H5 🌐 IP-Adresse"
+      icon: "mdi:ip-network-outline"
+      entity_category: diagnostic
+      
       
 sensor:
   - platform: uptime
     id: uptime_sensor
     internal: true  # ← wird in Web-Oberflächen nicht angezeigt
-    name: "I1 ⏱️ Betriebszeit"
+    name: "⏱️ Betriebszeit"
     icon: "mdi:clock-outline"
     entity_category: diagnostic
     
@@ -449,7 +467,7 @@ sensor:
     update_interval: 300s
 
   - platform: template
-    name: "I2 ⏱️ Gesamtdauer Sequenz (Minuten)"
+    name: "H3 ⏱️ Gesamtdauer Sequenz (Minuten)"
     id: total_sequence_time
     icon: "mdi:timer-sand"
     entity_category: diagnostic
@@ -471,7 +489,7 @@ script:
           condition:
             - lambda: 'return !id(sequential_running);'
           then:
-            - logger.log: "🚀 Starte manuelle Bewässerungssequenz"
+            - logger.log: "🚀 Starte Bewässerungssequenz"
             - script.execute: stop_all_valves
             - globals.set:
                 id: sequential_running
@@ -479,12 +497,24 @@ script:
             - globals.set:
                 id: current_valve_index
                 value: '0'
+
+            # Aktualisiere die letzten 3 Bewässerungstage
+            - lambda: |-
+                id(last_watering_3) = id(last_watering_2);
+                id(last_watering_2) = id(last_watering_1);
+                auto time = id(sntp_time).now();
+                if (time.is_valid()) {
+                  id(last_watering_1) = time.day_of_year;
+                  id(last_watering_day) = time.day_of_year;
+                }
+
             - delay: 2s
             - script.execute: start_current_valve
           else:
             - logger.log: 
                 format: "⚠️ Sequenz läuft bereits (Ventil %d)"
                 args: [ 'id(current_valve_index)' ]
+
 
   - id: stop_sequence
     then:
@@ -499,11 +529,12 @@ script:
 
   - id: emergency_stop
     then:
-      - logger.log: "🚨 NOTAUS aktiviert!"
+      - logger.log: "🚨 NOT-AUS aktiviert!"
       - script.execute: stop_sequence
 
   - id: stop_all_valves
     then:
+      - logger.log: "🛑 Alle Ventile geschlossen"
       - switch.turn_off: valve_0
       - switch.turn_off: valve_1
       - switch.turn_off: valve_2
@@ -512,6 +543,9 @@ script:
 
   - id: start_current_valve
     then:
+      - logger.log:
+           format: "💧 Ventil %d geöffnet"
+           args: [ 'id(current_valve_index)' ]
       - lambda: |-
           esphome::switch_::Switch* valves[] = {id(valve_0), id(valve_1), id(valve_2), id(valve_3), id(valve_4)};
           esphome::number::Number* durations[] = {id(valve_0_duration), id(valve_1_duration), id(valve_2_duration), id(valve_3_duration), id(valve_4_duration)};
@@ -556,7 +590,7 @@ script:
             id(rain_pause_start_day) = time.day_of_year;
           }
       - script.execute: stop_sequence
-      - component.update: rain_status
+      - component.update: overall_status
      
 
   - id: deactivate_rain_pause
@@ -568,7 +602,7 @@ script:
       - globals.set:
           id: rain_pause_start_day
           value: '0'
-      - component.update: rain_status
+      - component.update: overall_status
      
 # ⏲️ TIMER & AUTOMATISCHE BEWÄSSERUNG
 interval:
