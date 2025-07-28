@@ -1,6 +1,8 @@
 esphome:
   name: sprinklercomputer
   comment: "🌱 Automatisches Bewässerungssystem"
+  includes:
+    - <esp_system.h>   # Für esp_reset_reason()
   on_boot:
     priority: -100
     then:
@@ -12,12 +14,12 @@ esp32:
 
 # WiFi Konfiguration
 wifi:
-  reboot_timeout: 5min 
+  reboot_timeout: 0s
   ssid: "abc"
   password: "abc"
   ap:
     ssid: "Sprinkler Fallback"
-    password: "fallback123"
+    password: "abc"
    
 
 # Web Server
@@ -29,24 +31,29 @@ web_server:
 
 # API und Updates
 api:
+  reboot_timeout: 0s
+  
 ota:
   platform: esphome
 
 # Logging (erweitert)
 logger:
-  level: INFO
-  logs:
-    component: WARN
-    wifi: INFO
-    ota: INFO
-    api: INFO
-    web_server: INFO
-    switch: INFO
-    sensor: WARN
-    text_sensor: WARN
-    script: INFO
-    lambda: INFO
-    scheduler: WARN
+  level: DEBUG
+  #logs:
+   # component: WARN
+    #wifi: INFO
+    #ota: INFO
+    #api: INFO
+    #web_server: INFO
+    #switch: INFO
+    #sensor: WARN
+    #text_sensor: WARN
+    #script: INFO
+    #lambda: INFO
+    #scheduler: WARN
+    #esp32_panic: DEBUG
+    #esp32_exception: DEBUG
+    #esp32_core: DEBUG
 
 # Zeitgesteuerte Automatik
 time:
@@ -506,6 +513,26 @@ text_sensor:
       name: "H5 🌐 IP-Adresse"
       icon: "mdi:ip-network-outline"
       entity_category: diagnostic
+
+  - platform: template
+    name: "H6 🔄 Letzter Reset-Grund"
+    icon: "mdi:restart"
+    lambda: |-
+      auto reason = esp_reset_reason();
+      switch (reason) {
+        case ESP_RST_POWERON:      return {"Power-On Reset"};
+        case ESP_RST_EXT:          return {"Externer Reset (EN/RST)"};
+        case ESP_RST_SW:           return {"Software-Reset"};
+        case ESP_RST_PANIC:        return {"Panic-Reset"};
+        case ESP_RST_INT_WDT:      return {"Interrupt-Watchdog"};
+        case ESP_RST_TASK_WDT:     return {"Task-Watchdog"};
+        case ESP_RST_WDT:          return {"Global-Watchdog"};
+        case ESP_RST_DEEPSLEEP:    return {"Deep-Sleep-Wakeup"};
+        case ESP_RST_BROWNOUT:     return {"Brownout-Reset"};
+        case ESP_RST_SDIO:         return {"SDIO-Reset"};
+        default:                   return {std::string("Unbekannt: ") + to_string(reason)};
+      }
+    update_interval: 10s
       
       
 sensor:
