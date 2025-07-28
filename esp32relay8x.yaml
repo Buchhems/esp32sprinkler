@@ -1,17 +1,24 @@
 esphome:
   name: sprinklercomputer
   comment: "🌱 Automatisches Bewässerungssystem"
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: save_boot_time
 
 esp32:
   board: esp32dev
 
+
 # WiFi Konfiguration
 wifi:
+  reboot_timeout: 5min 
   ssid: "abc"
   password: "abc"
   ap:
     ssid: "Sprinkler Fallback"
     password: "fallback123"
+   
 
 # Web Server
 web_server:
@@ -52,6 +59,22 @@ time:
 
 # Globale Variablen (vereinfacht)
 globals:
+  - id: boot_timestamp_valid
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: boot_day_of_year
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: boot_hour
+    type: int  
+    restore_value: true
+    initial_value: '0'
+  - id: boot_minute
+    type: int
+    restore_value: true
+    initial_value: '0'
   - id: sequential_running
     type: bool
     restore_value: false
@@ -84,6 +107,7 @@ globals:
     type: int
     restore_value: true
     initial_value: '0'
+
 
 # Status LED (intern)
 light:
@@ -345,6 +369,7 @@ text_sensor:
           return {"🌧️ Regenpause aktiv"};
         }
         int passed    = t.day_of_year - id(rain_pause_start_day);
+        if (passed < 0) passed += 365;
         int remaining = (int)id(rain_pause_duration).state - passed;
         if (remaining > 0) {
           return {"🌧️ Regenpause – noch " + to_string(remaining) + " Tage"};
@@ -401,19 +426,79 @@ text_sensor:
     update_interval: 60s
 
   - platform: template
-    name: "H4 ⏱️ Betriebszeit"
-    icon: "mdi:clock-time-eight-outline"
+    name: "H4 🔄 System-Info"
+    icon: "mdi:information-outline"
     entity_category: diagnostic
     lambda: |-
-      int seconds = (int)(id(uptime_sensor).state);
-      int days = seconds / 86400;
-      int hours = (seconds % 86400) / 3600;
-      int minutes = (seconds % 3600) / 60;
-       return {
-        "🔧 " + to_string(days) + " Tage, " + 
-        to_string(hours) + " Stunden, " + 
-        to_string(minutes) + " Minuten"
-      };
+      std::string result = "";
+      
+      // 1. Boot-Zeit anzeigen (falls verfügbar)
+      if (id(boot_timestamp_valid)) {
+        auto now = id(sntp_time).now();
+        if (now.is_valid()) {
+          int boot_day = id(boot_day_of_year);
+          int days_ago = now.day_of_year - boot_day;
+          
+          // Jahreswechsel berücksichtigen
+          if (days_ago < 0) days_ago += 365;
+          
+          if (days_ago == 0) {
+            result += "🔄 Heute um " + to_string(id(boot_hour)) + ":" + 
+                     (id(boot_minute) < 10 ? "0" : "") + to_string(id(boot_minute)) + " gestartet";
+          } else if (days_ago == 1) {
+            result += "🔄 Gestern um " + to_string(id(boot_hour)) + ":" + 
+                     (id(boot_minute) < 10 ? "0" : "") + to_string(id(boot_minute)) + " gestartet";
+          } else {
+            result += "🔄 Vor " + to_string(days_ago) + " Tagen gestartet";
+          }
+        } else {
+          result += "🔄 Boot-Info gespeichert (Zeit sync läuft...)";
+        }
+      } else {
+        result += "🔄 Gerade gestartet";
+      }
+      
+      // 2. Aktuelle Uptime hinzufügen (mit Überlauf-Warnung)
+      if (id(uptime_sensor).has_state()) {
+        uint32_t seconds = (uint32_t)(id(uptime_sensor).state);
+        result += " • ";
+        
+        if (seconds < 60) {
+          result += to_string(seconds) + "s Uptime";
+        } else if (seconds < 3600) {
+          result += to_string(seconds / 60) + "m Uptime";  
+        } else if (seconds < 86400) {
+          uint32_t hours = seconds / 3600;
+          uint32_t minutes = (seconds % 3600) / 60;
+          result += to_string(hours) + "h " + to_string(minutes) + "m Uptime";
+        } else {
+          uint32_t days = seconds / 86400;
+          uint32_t hours = (seconds % 86400) / 3600;
+          if (days < 45) {
+            result += to_string(days) + "d " + to_string(hours) + "h Uptime";
+          } else if (days < 49) {
+            result += to_string(days) + "d " + to_string(hours) + "h Uptime (⚠️ Überlauf bald)";
+          } else {
+            // Nach Überlauf: Echte Uptime berechnen
+            if (id(boot_timestamp_valid)) {
+              auto now = id(sntp_time).now();
+              if (now.is_valid()) {
+                int boot_day = id(boot_day_of_year);
+                int real_days = now.day_of_year - boot_day;
+                if (real_days < 0) real_days += 365; // Jahreswechsel
+                
+                result += to_string(real_days) + "d+ Uptime (Hardware-Zähler übergelaufen)";
+              } else {
+                result += "49d+ Uptime (Hardware-Zähler übergelaufen)";
+              }
+            } else {
+              result += "Uptime unbekannt nach Überlauf";
+            }
+          }
+        }
+      }
+      
+      return {result};
     update_interval: 60s
     
   - platform: wifi_info
@@ -439,31 +524,56 @@ sensor:
     icon: "mdi:calendar-clock"
     entity_category: ""
     lambda: |-
+      auto time = id(sntp_time).now();
+      // 1. Regenpausen-Behandlung
       if (id(rain_pause_active)) {
-          auto time = id(sntp_time).now();
           if (!time.is_valid()) return -2;  // Zeit fehlt
     
           int rain_start_day = id(rain_pause_start_day);
           int rain_duration = (int)id(rain_pause_duration).state;
           int days_passed = time.day_of_year - rain_start_day;
+          if (days_passed < 0) days_passed += 365;
           int days_remaining = rain_duration - days_passed;
           // Bei aktiver Regenpause: Rückgabe negativer Wert zur Unterscheidung
           return (days_remaining > 0) ? (-10 - days_remaining) : 0; 
       }
 
-      auto time = id(sntp_time).now();
-      if (!time.is_valid()) return -2;
-
+      // 2. Variablen
       int current_day = time.day_of_year;
       int last_day = id(last_watering_day);
       int interval = (int)id(watering_interval).state;
 
-      if (last_day == 0) return 0;
+      // 3. Erste Bewässerung (nie bewässert)
+      if (last_day == 0) {
+        ESP_LOGI("watering", "📅 Erste Bewässerung steht an");
+        return 0;  // Heute bewässern
+      }
 
+      // 4. Tage seit letzter Bewässerung
       int days_since = current_day - last_day;
+      
+      // 5. Jahreswechsel
+      if (days_since < 0) {
+        // Jahreswechsel (z.B. von Tag 365 auf Tag 5)
+        days_since += 365;  // Vereinfacht, ignoriert Schaltjahre
+        ESP_LOGW("watering", "📅 Jahreswechsel erkannt, korrigiert auf %d Tage", days_since);
+      }
+
+      // 7. Berechnung der verbleibenden Tage
       int days_until = interval - days_since;
 
-      return (days_until <= 0) ? 0 : days_until;
+      // 8. DEBUGGING
+      ESP_LOGI("watering", "📊 Berechnung: heute=%d, letztesBew=%d, seit=%d, intervall=%d, bis=%d", 
+               current_day, last_day, days_since, interval, days_until);
+
+      // 9. KORRIGIERTE RÜCKGABE
+      if (days_until <= 0) {
+        ESP_LOGI("watering", "🌱 Bewässerung überfällig (%d Tage)", abs(days_until));
+        return 0;  // Bewässerung ist fällig
+      } else {
+        ESP_LOGI("watering", "⏰ Bewässerung in %d Tagen", days_until);
+        return days_until;
+      }
     update_interval: 300s
 
   - platform: template
@@ -483,6 +593,32 @@ sensor:
 
 # 🔧 SKRIPTE (Vereinfachte Logik)
 script:
+  - id: save_boot_time
+    then:
+      - delay: 30s
+      - lambda: |-
+          // NUR ausführen wenn noch nicht gesetzt UND uptime klein ist (echtes Boot)
+          auto now = id(sntp_time).now();
+          uint32_t uptime_seconds = (uint32_t)id(uptime_sensor).state;
+          
+          if (now.is_valid() && !id(boot_timestamp_valid) && uptime_seconds < 300) {
+            // Boot-Zeit nur berechnen wenn Uptime < 5 Minuten (sicher ein echter Boot)
+            time_t boot_timestamp = now.timestamp - (time_t)uptime_seconds;
+            auto boot_time = ESPTime::from_epoch_local(boot_timestamp);
+            
+            id(boot_day_of_year) = boot_time.day_of_year;
+            id(boot_hour) = boot_time.hour;
+            id(boot_minute) = boot_time.minute;
+            id(boot_timestamp_valid) = true;
+            
+            ESP_LOGI("boot", "Boot-Zeit EINMALIG gespeichert: Tag %d, %02d:%02d (Uptime war %d s)", 
+                     boot_time.day_of_year, boot_time.hour, boot_time.minute, uptime_seconds);
+          } else if (id(boot_timestamp_valid)) {
+            ESP_LOGI("boot", "Boot-Zeit bereits gespeichert - überspringe");
+          } else if (uptime_seconds >= 300) {
+            ESP_LOGW("boot", "Uptime zu hoch (%d s) - kein echter Boot, überspringe", uptime_seconds);
+          }
+          
   - id: start_sequence
     then:
       - if:
@@ -602,11 +738,19 @@ script:
       - globals.set:
           id: rain_pause_start_day
           value: '0'
-      - component.update: next_watering
       - component.update: overall_status
      
 # ⏲️ TIMER & AUTOMATISCHE BEWÄSSERUNG
 interval:
+  - interval: 60s
+    id: boot_time_checker
+    then:
+      - lambda: |-
+          uint32_t uptime_seconds = (uint32_t)id(uptime_sensor).state;
+          // Nur in den ersten 10 Minuten versuchen
+          if (!id(boot_timestamp_valid) && uptime_seconds < 600) {
+            id(save_boot_time).execute();
+          }
   # Timer für Ventil-Kontrolle (prüft alle 10 Sekunden)
   - interval: 10s
     id: valve_controller
@@ -652,40 +796,45 @@ interval:
           auto time = id(sntp_time).now();
           if (!time.is_valid()) return;
           
-          int current_hour = time.hour;
+          int current_hour   = time.hour;
           int current_minute = time.minute;
-          int target_hour = (int)id(start_hour).state;
-          int target_minute = (int)id(start_minute).state;
+          int target_hour    = (int)id(start_hour).state;
+          int target_minute  = (int)id(start_minute).state;
           
-          // Prüfen ob es Zeit für die Bewässerung ist
+          // Nur zur eingestellten Startzeit prüfen
           if (current_hour == target_hour && current_minute == target_minute) {
-            int current_day = time.day_of_year;
-            int last_day = id(last_watering_day);
-            int interval = (int)id(watering_interval).state;
             
-            // Regenpause prüfen
+            // === REGENPAUSE-LOGIK ===
             if (id(rain_pause_active)) {
-              int rain_start_day = id(rain_pause_start_day);
-              int rain_duration = (int)id(rain_pause_duration).state;
-              int rain_days_passed = current_day - rain_start_day;
+              int rain_start_day   = id(rain_pause_start_day);
+              int rain_duration    = (int)id(rain_pause_duration).state;
+              int rain_days_passed = time.day_of_year - rain_start_day;
+              if (rain_days_passed < 0) rain_days_passed += 365;
               
               if (rain_days_passed >= rain_duration) {
                 ESP_LOGI("rain", "☀️ Regenpause automatisch beendet nach %d Tagen", rain_days_passed);
                 id(deactivate_rain_pause).execute();
+                // optional: sofortige Bewässerung starten
+                id(start_sequence).execute();
               } else {
-                ESP_LOGI("rain", "☔ Bewässerung übersprungen - Regenpause noch %d Tage aktiv", 
+                ESP_LOGI("rain", "☔ Bewässerung übersprungen – noch %d Tage Regenpause",
                          rain_duration - rain_days_passed);
                 return;
               }
             }
             
-            // Prüfen ob Bewässerung fällig ist
+            // === REGULÄRE AUTOMATIK ===
+            int current_day = time.day_of_year;
+            int last_day    = id(last_watering_day);
+            int interval    = (int)id(watering_interval).state;
+            
+            // Fälligkeitscheck
             if ((current_day - last_day) >= interval || last_day == 0) {
               ESP_LOGI("auto", "🌱 Starte automatische Bewässerung (alle %d Tage)", interval);
               id(last_watering_day) = current_day;
               id(start_sequence).execute();
             }
-          }
+          }  
 
 # 🔮 ZUKÜNFTIGE ERWEITERUNGEN
 # Für neue Ventile einfach hinzufügen:
